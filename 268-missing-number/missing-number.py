@@ -3,5 +3,4 @@ class Solution:
         m=len(nums)
         es=(m*(m+1))//2
         s=sum(nums)
-        print(es,s)
         return es-s
