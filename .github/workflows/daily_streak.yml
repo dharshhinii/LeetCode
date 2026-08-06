@@ -48,7 +48,7 @@ jobs:
                 # Commit and push
                 git add "Python/$TOPIC_NAME/$PROBLEM_NAME"
                 git add .pending/ || true
-                git commit -m "Added solution for $PROBLEM_NAME"
+                git commit -m "Add solution"
                 git push
               else
                 echo "No problem folders found in $TOPIC_NAME"
