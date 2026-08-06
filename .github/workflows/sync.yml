@@ -42,8 +42,8 @@ jobs:
                 rmdir "$TOPIC_DIR" 2>/dev/null || true
                 
                 # Configure git
-                git config --global user.name "github-actions[bot]"
-                git config --global user.email "github-actions[bot]@users.noreply.github.com"
+                git config --global user.name "Dharshini"
+                git config --global user.email "dharshhinii@gmail.com"
                 
                 # Commit and push
                 git add "Python/$TOPIC_NAME/$PROBLEM_NAME"
