@@ -1,0 +1,61 @@
+name: Daily LeetCode Streak
+
+on:
+  schedule:
+    # Runs at 12:00 PM UTC every day
+    - cron: '0 12 * * *'
+  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  commit_problem:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Move one problem from pending to Python
+        run: |
+          # Check if .pending directory exists and is not empty
+          if [ -d ".pending" ] && [ "$(ls -A .pending)" ]; then
+            # Find the first topic folder inside .pending
+            TOPIC_DIR=$(find .pending -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            if [ -n "$TOPIC_DIR" ]; then
+              TOPIC_NAME=$(basename "$TOPIC_DIR")
+              
+              # Find the first problem folder inside that topic
+              PROBLEM_DIR=$(find "$TOPIC_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+              
+              if [ -n "$PROBLEM_DIR" ]; then
+                PROBLEM_NAME=$(basename "$PROBLEM_DIR")
+                
+                # Create the destination topic directory if it doesn't exist
+                mkdir -p "Python/$TOPIC_NAME"
+                
+                # Move the problem folder to the actual Python/Topic folder
+                mv "$PROBLEM_DIR" "Python/$TOPIC_NAME/"
+                echo "Moved $PROBLEM_NAME to Python/$TOPIC_NAME"
+                
+                # If the pending topic directory is now empty, remove it
+                rmdir "$TOPIC_DIR" 2>/dev/null || true
+                
+                # Configure git
+                git config --global user.name "github-actions[bot]"
+                git config --global user.email "github-actions[bot]@users.noreply.github.com"
+                
+                # Commit and push
+                git add "Python/$TOPIC_NAME/$PROBLEM_NAME"
+                git add .pending/ || true
+                git commit -m "Added solution for $PROBLEM_NAME"
+                git push
+              else
+                echo "No problem folders found in $TOPIC_NAME"
+              fi
+            else
+              echo "No topics found in .pending"
+            fi
+          else
+            echo "No .pending directory found or it is empty. Streak complete!"
+          fi
