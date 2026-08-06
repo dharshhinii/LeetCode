@@ -36,22 +36,34 @@ def get_solved_questions(session, csrf):
     
     # Filter by AC (Accepted)
     variables = {
-        "limit": 500, # Assuming max 500 solved for now to get all at once
+        "limit": 100, # Max allowed by LeetCode is 100 per request
         "skip": 0,
         "filters": {"status": "AC"}
     }
     
-    response = requests.post(url, json={'query': query, 'variables': variables}, headers=headers)
-    if response.status_code != 200:
-        print(f"Error fetching questions: {response.text}")
-        return []
-        
-    data = response.json()
-    try:
-        return data['data']['problemsetQuestionList']['questions']
-    except KeyError:
-        print("Could not fetch data. Please check your session cookie.")
-        return []
+    all_questions = []
+    
+    while True:
+        response = requests.post(url, json={'query': query, 'variables': variables}, headers=headers)
+        if response.status_code != 200:
+            print(f"Error fetching questions: {response.text}")
+            break
+            
+        data = response.json()
+        try:
+            questions = data['data']['problemsetQuestionList']['questions']
+            total = data['data']['problemsetQuestionList']['total']
+            all_questions.extend(questions)
+            
+            if len(all_questions) >= total or len(questions) == 0:
+                break
+                
+            variables['skip'] += 100
+        except KeyError:
+            print("Could not fetch data. Please check your session cookie.")
+            break
+            
+    return all_questions
 
 def get_latest_submission_id(slug, session, csrf):
     url = 'https://leetcode.com/graphql'
@@ -153,15 +165,18 @@ def main():
         
     print(f"Found {len(questions)} accepted questions total.")
     
-    base_dir = ".pending"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.join(script_dir, ".pending")
     os.makedirs(base_dir, exist_ok=True)
     
     # Pre-scan the Python directory for existing problems to avoid topic name mismatches 
     # (e.g. 'Array' vs 'Arrays')
     existing_problems = set()
-    if os.path.exists("Python"):
-        for topic_folder in os.listdir("Python"):
-            topic_path = os.path.join("Python", topic_folder)
+    python_dir = os.path.join(script_dir, "Python")
+    
+    if os.path.exists(python_dir):
+        for topic_folder in os.listdir(python_dir):
+            topic_path = os.path.join(python_dir, topic_folder)
             if os.path.isdir(topic_path):
                 for prob_folder in os.listdir(topic_path):
                     existing_problems.add(prob_folder)
@@ -172,6 +187,7 @@ def main():
         if os.path.isdir(topic_path):
             for prob_folder in os.listdir(topic_path):
                 existing_problems.add(prob_folder)
+
     
     for q in questions:
         slug = q['titleSlug']
