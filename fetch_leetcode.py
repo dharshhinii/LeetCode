@@ -3,7 +3,7 @@ import os
 import json
 import time
 
-def get_recent_submissions(session, csrf):
+def get_solved_questions(session, csrf):
     url = 'https://leetcode.com/graphql'
     headers = {
         'Content-Type': 'application/json',
@@ -12,31 +12,48 @@ def get_recent_submissions(session, csrf):
         'Referer': 'https://leetcode.com/'
     }
     
-    # We will fetch up to 200 recent submissions to get the missing ones
     query = """
-    query recentAcSubmissions($limit: Int!) {
-      recentAcSubmissionList(limit: $limit) {
-        id
-        title
-        titleSlug
-        timestamp
+    query problemsetQuestionList($limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+      problemsetQuestionList: questionList(
+        categorySlug: ""
+        limit: $limit
+        skip: $skip
+        filters: $filters
+      ) {
+        total: totalNum
+        questions: data {
+          questionId
+          frontendQuestionId: questionFrontendId
+          title
+          titleSlug
+          topicTags {
+            name
+          }
+        }
       }
     }
     """
     
-    response = requests.post(url, json={'query': query, 'variables': {'limit': 200}}, headers=headers)
+    # Filter by AC (Accepted)
+    variables = {
+        "limit": 500, # Assuming max 500 solved for now to get all at once
+        "skip": 0,
+        "filters": {"status": "AC"}
+    }
+    
+    response = requests.post(url, json={'query': query, 'variables': variables}, headers=headers)
     if response.status_code != 200:
-        print(f"Error fetching submissions: {response.text}")
+        print(f"Error fetching questions: {response.text}")
         return []
         
     data = response.json()
-    if 'data' not in data or 'recentAcSubmissionList' not in data['data']:
+    try:
+        return data['data']['problemsetQuestionList']['questions']
+    except KeyError:
         print("Could not fetch data. Please check your session cookie.")
         return []
-        
-    return data['data']['recentAcSubmissionList']
 
-def get_submission_details(slug, sub_id, session, csrf):
+def get_latest_submission_id(slug, session, csrf):
     url = 'https://leetcode.com/graphql'
     headers = {
         'Content-Type': 'application/json',
@@ -45,60 +62,81 @@ def get_submission_details(slug, sub_id, session, csrf):
         'Referer': 'https://leetcode.com/'
     }
     
-    # Get submission code
-    code_query = """
+    query = """
+    query submissionList($offset: Int!, $limit: Int!, $questionSlug: String!) {
+      submissionList(offset: $offset, limit: $limit, questionSlug: $questionSlug) {
+        submissions {
+          id
+          statusDisplay
+          lang
+        }
+      }
+    }
+    """
+    
+    variables = {
+        "offset": 0,
+        "limit": 20,
+        "questionSlug": slug
+    }
+    
+    response = requests.post(url, json={'query': query, 'variables': variables}, headers=headers)
+    try:
+        submissions = response.json()['data']['submissionList']['submissions']
+        # Find the first Python accepted submission
+        for sub in submissions:
+            if sub['statusDisplay'] == 'Accepted' and ('python' in sub['lang']):
+                return sub['id'], sub['lang']
+    except Exception:
+        pass
+    return None, None
+
+def get_submission_code(sub_id, session, csrf):
+    url = 'https://leetcode.com/graphql'
+    headers = {
+        'Content-Type': 'application/json',
+        'Cookie': f'LEETCODE_SESSION={session}; csrftoken={csrf}',
+        'x-csrftoken': csrf,
+        'Referer': 'https://leetcode.com/'
+    }
+    
+    query = """
     query submissionDetails($submissionId: Int!) {
       submissionDetails(submissionId: $submissionId) {
         code
-        lang {
-          name
-        }
       }
     }
     """
+    response = requests.post(url, json={'query': query, 'variables': {'submissionId': int(sub_id)}}, headers=headers)
+    try:
+        return response.json()['data']['submissionDetails']['code']
+    except Exception:
+        return None
+        
+def get_question_content(slug, session, csrf):
+    url = 'https://leetcode.com/graphql'
+    headers = {
+        'Content-Type': 'application/json',
+        'Cookie': f'LEETCODE_SESSION={session}; csrftoken={csrf}',
+        'x-csrftoken': csrf,
+        'Referer': 'https://leetcode.com/'
+    }
     
-    # Get problem details (tags and description)
-    prob_query = """
+    query = """
     query questionData($titleSlug: String!) {
       question(titleSlug: $titleSlug) {
-        questionId
-        title
         content
-        topicTags {
-          name
-        }
       }
     }
     """
-    
-    code_res = requests.post(url, json={'query': code_query, 'variables': {'submissionId': int(sub_id)}}, headers=headers)
-    prob_res = requests.post(url, json={'query': prob_query, 'variables': {'titleSlug': slug}}, headers=headers)
-    
+    response = requests.post(url, json={'query': query, 'variables': {'titleSlug': slug}}, headers=headers)
     try:
-        code_data = code_res.json()['data']['submissionDetails']
-        prob_data = prob_res.json()['data']['question']
-        
-        # Pick the first topic as the main folder
-        topic = prob_data['topicTags'][0]['name'] if prob_data['topicTags'] else "Uncategorized"
-        # Sanitize topic name
-        topic = topic.replace(" ", "_").replace("-", "_")
-        
-        return {
-            'code': code_data['code'],
-            'lang': code_data['lang']['name'],
-            'title': prob_data['title'],
-            'questionId': prob_data['questionId'],
-            'content': prob_data['content'],
-            'topic': topic,
-            'slug': slug
-        }
-    except Exception as e:
-        print(f"Error fetching details for {slug}: {e}")
-        return None
+        return response.json()['data']['question']['content']
+    except Exception:
+        return ""
 
 def main():
-    print("=== LeetCode Problem Fetcher & Streak Automator ===")
-    print("This script will download your solved problems and stage them for the daily GitHub Action.")
+    print("=== LeetCode Problem Fetcher (All Solved) ===")
     session = input("Enter your LEETCODE_SESSION cookie: ").strip()
     csrf = input("Enter your csrftoken cookie: ").strip()
     
@@ -106,64 +144,56 @@ def main():
         print("Both cookies are required!")
         return
 
-    print("\nFetching recent accepted submissions...")
-    submissions = get_recent_submissions(session, csrf)
+    print("\nFetching all accepted questions (this might take a few seconds)...")
+    questions = get_solved_questions(session, csrf)
     
-    if not submissions:
-        print("No submissions found.")
+    if not questions:
+        print("No solved questions found or cookies are invalid.")
         return
         
-    print(f"Found {len(submissions)} accepted submissions.")
+    print(f"Found {len(questions)} accepted questions total.")
     
     base_dir = ".pending"
     os.makedirs(base_dir, exist_ok=True)
     
-    processed = set()
-    
-    for sub in submissions:
-        slug = sub['titleSlug']
-        if slug in processed:
+    for q in questions:
+        slug = q['titleSlug']
+        frontend_id = q['frontendQuestionId']
+        title = q['title']
+        
+        topic = q['topicTags'][0]['name'] if q['topicTags'] else "Uncategorized"
+        topic = topic.replace(" ", "_").replace("-", "_")
+        
+        prob_dir_name = f"{frontend_id}-{slug}"
+        prob_dir = os.path.join(base_dir, topic, prob_dir_name)
+        main_repo_prob_path = os.path.join("Python", topic, prob_dir_name)
+        
+        if os.path.exists(main_repo_prob_path) or os.path.exists(prob_dir):
+            continue # Already in repo or already pending
+            
+        print(f"Fetching code for {frontend_id}. {title}...")
+        sub_id, lang = get_latest_submission_id(slug, session, csrf)
+        
+        if not sub_id:
+            print(f"  Skipping {title} (No Python accepted submission found)")
             continue
             
-        print(f"Processing: {sub['title']}...")
-        details = get_submission_details(slug, sub['id'], session, csrf)
+        code = get_submission_code(sub_id, session, csrf)
+        content = get_question_content(slug, session, csrf)
         
-        if details:
-            # We only want Python submissions as per your repo structure
-            if details['lang'] != 'python' and details['lang'] != 'python3':
-                print(f"  Skipping {slug} (Not Python)")
-                continue
-                
-            topic_dir = os.path.join(base_dir, details['topic'])
-            prob_dir_name = f"{details['questionId']}-{slug}"
-            prob_dir = os.path.join(topic_dir, prob_dir_name)
+        os.makedirs(prob_dir, exist_ok=True)
+        
+        with open(os.path.join(prob_dir, "README.md"), "w", encoding="utf-8") as f:
+            f.write(f"<h2>{frontend_id}. {title}</h2>\n")
+            f.write(content or "")
             
-            # Check if this problem is already in the main repo to avoid duplicates
-            main_repo_prob_path = os.path.join("Python", details['topic'], prob_dir_name)
-            if os.path.exists(main_repo_prob_path) or os.path.exists(prob_dir):
-                print(f"  Skipping {slug} (Already exists in repo or pending)")
-                processed.add(slug)
-                continue
-                
-            os.makedirs(prob_dir, exist_ok=True)
+        with open(os.path.join(prob_dir, "solution.py"), "w", encoding="utf-8") as f:
+            f.write(code or "")
             
-            # Write README.md
-            with open(os.path.join(prob_dir, "README.md"), "w", encoding="utf-8") as f:
-                f.write(f"<h2>{details['questionId']}. {details['title']}</h2>\n")
-                f.write(details['content'] or "")
-                
-            # Write solution file
-            ext = ".py"
-            with open(os.path.join(prob_dir, f"solution{ext}"), "w", encoding="utf-8") as f:
-                f.write(details['code'])
-                
-            print(f"  Successfully staged {slug} under {details['topic']}!")
-            processed.add(slug)
-            
+        print(f"  Successfully staged {title} under {topic}!")
         time.sleep(1) # Be gentle with the API
         
     print("\nDone! All new problems have been staged in the '.pending' directory.")
-    print("The GitHub Action will now automatically commit 1 problem per day from this folder.")
 
 if __name__ == "__main__":
     main()
