@@ -156,6 +156,23 @@ def main():
     base_dir = ".pending"
     os.makedirs(base_dir, exist_ok=True)
     
+    # Pre-scan the Python directory for existing problems to avoid topic name mismatches 
+    # (e.g. 'Array' vs 'Arrays')
+    existing_problems = set()
+    if os.path.exists("Python"):
+        for topic_folder in os.listdir("Python"):
+            topic_path = os.path.join("Python", topic_folder)
+            if os.path.isdir(topic_path):
+                for prob_folder in os.listdir(topic_path):
+                    existing_problems.add(prob_folder)
+                    
+    # Also scan .pending just in case
+    for topic_folder in os.listdir(base_dir):
+        topic_path = os.path.join(base_dir, topic_folder)
+        if os.path.isdir(topic_path):
+            for prob_folder in os.listdir(topic_path):
+                existing_problems.add(prob_folder)
+    
     for q in questions:
         slug = q['titleSlug']
         frontend_id = q['frontendQuestionId']
@@ -165,11 +182,12 @@ def main():
         topic = topic.replace(" ", "_").replace("-", "_")
         
         prob_dir_name = f"{frontend_id}-{slug}"
-        prob_dir = os.path.join(base_dir, topic, prob_dir_name)
-        main_repo_prob_path = os.path.join("Python", topic, prob_dir_name)
         
-        if os.path.exists(main_repo_prob_path) or os.path.exists(prob_dir):
+        # Check if the problem is already anywhere in the repo
+        if prob_dir_name in existing_problems:
             continue # Already in repo or already pending
+            
+        prob_dir = os.path.join(base_dir, topic, prob_dir_name)
             
         print(f"Fetching code for {frontend_id}. {title}...")
         sub_id, lang = get_latest_submission_id(slug, session, csrf)
